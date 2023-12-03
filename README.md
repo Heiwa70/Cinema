@@ -50,8 +50,5 @@ Le projet doit être soumis avant le Vendredi 08 décembre, 23h59.
 ## Licence
 Ce projet est sous licence [MIT](LICENSE).
 
-## Contact
-Pour toute question, ne contactez pas Fayçal 😭
-
 [Remarque]
 Le projet est développé et testé sur Linux il est donc pour l'instant recommandé
