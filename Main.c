@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 
-#define MAX_CLIENTS 1
+#define MAX_CLIENTS 5
 #define NUM_MOVIES 5
 #define MAX_SEATS 50
 
@@ -21,11 +21,11 @@ typedef struct
 } Movie;
 
 Movie movies[NUM_MOVIES] = {
-    {"Le Loup De Walstreet", MAX_SEATS, true, 16},
-    {"Harry Potter 1", MAX_SEATS, false, NULL},
+    {"Le Loup De Walstreet", MAX_SEATS, true, 12},
+    {"Harry Potter 1", MAX_SEATS, false, 0},
     {"50 nuances de grey", MAX_SEATS, true, 16},
-    {"Transformers", MAX_SEATS},
-    {"Terminator", MAX_SEATS, false, NULL}};
+    {"Transformers", MAX_SEATS, false, 0},
+    {"Terminator", MAX_SEATS, false, 0}};
 
 typedef struct
 {
