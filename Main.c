@@ -10,6 +10,7 @@
 #define MAX_CLIENTS 5
 #define NUM_MOVIES 5
 #define MAX_SEATS 50
+#define MAX_MOVIE_PREFERENCES 3
 
 // if is_autorized est vrai, le client doit avoir un certain age pour acheter des billets
 typedef struct
@@ -22,7 +23,7 @@ typedef struct
 
 Movie movies[NUM_MOVIES] = {
     {"Le Loup De Walstreet", MAX_SEATS, true, 12},
-    {"Harry Potter 1", MAX_SEATS, false, 0},
+    {"Harry Potter 1", MAX_SEATS, false, 100},
     {"50 nuances de grey", MAX_SEATS, true, 16},
     {"Transformers", MAX_SEATS, false, 0},
     {"Terminator", MAX_SEATS, false, 0}};
@@ -30,7 +31,7 @@ Movie movies[NUM_MOVIES] = {
 typedef struct
 {
     long msg_type;
-    char movie_name[50];
+    char movie_preferences[MAX_MOVIE_PREFERENCES][50];
     int num_tickets;
     int age;
 } Client;
@@ -41,7 +42,6 @@ int main()
 
     for (int i = 0; i < MAX_CLIENTS; i++)
     {
-        printf("Client %d\n", i + 1);
         if (fork() == 0)
         {                    // Créer un processus enfant
             srand(getpid()); // Utiliser le PID comme graine pour rand()
@@ -50,10 +50,16 @@ int main()
             client.msg_type = 1;
             client.age = (rand() % 100) + 1;
 
-            int random_movie_index = rand() % NUM_MOVIES; // Génère un index aléatoire pour le film
-            int random_ticket_num = (rand() % 5) + 1;     // Génère un nombre aléatoire de billets entre 1 et 5
+            printf("Client %d qui a %d ans\n", i + 1, client.age);
 
-            strcpy(client.movie_name, movies[random_movie_index].movie_name);
+            // Remplir le tableau movie_preferences avec des films aléatoires
+            for (int k = 0; k < MAX_MOVIE_PREFERENCES; k++)
+            {
+                int random_movie_index = rand() % NUM_MOVIES; // Génère un index aléatoire pour le film
+                strcpy(client.movie_preferences[k], movies[random_movie_index].movie_name);
+            }
+
+            int random_ticket_num = (rand() % 5) + 1; // Génère un nombre aléatoire de billets entre 1 et 5
             client.num_tickets = random_ticket_num;
 
             msgsnd(msgid, &client, sizeof(client), 0); // Envoyer la demande de billets à la file de messages
@@ -67,13 +73,24 @@ int main()
         Client client;
         msgrcv(msgid, &client, sizeof(client), 1, 0); // Recevoir une demande de billets de la file de messages
 
-        // Décompter le nombre de places disponibles pour le film correspondant
-        for (int j = 0; j < NUM_MOVIES; j++)
+        // Parcourir les préférences de films du client
+        for (int k = 0; k < MAX_MOVIE_PREFERENCES; k++)
         {
-            if (strcmp(client.movie_name, movies[j].movie_name) == 0)
+            // Décompter le nombre de places disponibles pour le film correspondant
+            for (int j = 0; j < NUM_MOVIES; j++)
             {
-                movies[j].seats_available -= client.num_tickets;
-                break;
+                if (strcmp(client.movie_preferences[k], movies[j].movie_name) == 0)
+                {
+                    if (movies[j].is_autorized && client.age < movies[j].age)
+                    {
+                        printf("Le client %d n'a pas l'âge requis pour voir %s\n", i + 1, movies[j].movie_name);
+                    }
+                    else
+                    {
+                        movies[j].seats_available -= client.num_tickets;
+                        break;
+                    }
+                }
             }
         }
     }
