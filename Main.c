@@ -8,8 +8,12 @@
 #include <stdbool.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <time.h>
+#include <setjmp.h>
 
-#define MAX_CLIENTS 2
+jmp_buf env; // Variable globale pour stocker l'environnement de saut
+
+#define MAX_CLIENTS 30
 #define NUM_MOVIES 5
 #define MAX_SEATS 50
 #define MAX_MOVIE_PREFERENCES 3
@@ -40,35 +44,55 @@ typedef struct
 
 Movie movies[NUM_MOVIES] = {
     {"Le Loup De Walstreet", MAX_SEATS, true, 12},
-    {"Harry Potter 1", MAX_SEATS, false, 100},
+    {"Harry Potter 1", MAX_SEATS, false, 50},
     {"50 nuances de grey", MAX_SEATS, true, 16},
     {"Transformers", MAX_SEATS, false, 0},
     {"Terminator", MAX_SEATS, false, 0}};
-void generate_clients(int msgid, Movie *shared_movies)
+
+void generate_clients(int msgid, Movie *shared_movies, pid_t *child_pids, int semid)
 {
     for (int i = 0; i < MAX_CLIENTS; i++)
     {
-        if (fork() == 0)
+        pid_t pid = fork();
+        if (pid == 0)
         {
-            srand(getpid());
+            if (setjmp(env) == 0)
+            {
+                srand(getpid());
 
-            Client client;
-            client.msg_type = 1;
+                Client client;
+                client.msg_type = 1;
 
-            strcpy(client.nom, nom[rand() % 10]);
-            strcpy(client.prenom, prenom[rand() % 10]);
-            client.age = (rand() % 100) + 1;
+                strcpy(client.nom, nom[rand() % 10]);
+                strcpy(client.prenom, prenom[rand() % 10]);
+                client.age = (rand() % 100) + 1;
 
-            printf(" %s %s qui a %d ans et a le numéro de processus %d\n", client.prenom, client.nom, client.age, getpid());
+                printf("Le client %s %s avec le pid : %d\n", client.prenom, client.nom, getpid());
 
-            int random_movie_index = rand() % NUM_MOVIES;
-            strcpy(client.movie_preferences[0], shared_movies[random_movie_index].movie_name);
+                for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
+                {
+                    int random_movie_index = rand() % NUM_MOVIES;
+                    strcpy(client.movie_preferences[j], shared_movies[random_movie_index].movie_name);
+                }
 
-            int random_ticket_num = (rand() % 5) + 1; // Générer aléatoirement le nombre de billets une seule fois
-            client.num_tickets = random_ticket_num;
+                int random_ticket_num = (rand() % 5) + 1;
+                client.num_tickets = random_ticket_num;
 
-            msgsnd(msgid, &client, sizeof(client), 0);
-            exit(0); // Terminer le processus enfant
+                msgsnd(msgid, &client, sizeof(client), 0);
+            }
+
+            // Chaque processus fils doit également utiliser les sémaphores
+            for (int j = 0; j < NUM_MOVIES; j++)
+            {
+                struct sembuf v = {j, 1, 0};
+                semop(semid, &v, 1);
+            }
+
+            exit(0);
+        }
+        else
+        {
+            child_pids[i] = pid;
         }
     }
 }
@@ -101,7 +125,6 @@ void process_ticket_requests(int msgid, Movie *shared_movies, int semid)
         for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
         {
             int random_movie_index = rand() % NUM_MOVIES;
-            strcpy(message.movie_preferences[j], shared_movies[random_movie_index].movie_name);
 
             // Avant de réserver des billets pour un film :
             struct sembuf p = {random_movie_index, -1, 0}; // Utiliser l'index généré aléatoirement du film
@@ -121,12 +144,12 @@ void process_ticket_requests(int msgid, Movie *shared_movies, int semid)
                 }
                 else
                 {
-                    printf("Le client %s n'a pas pu réserver %d billets pour %s car il ne reste que %d places disponibles\n", message.nom, random_ticket_num, shared_movies[random_movie_index].movie_name, shared_movies[random_movie_index].seats_available);
+                    printf("\033[1;31mLe client %s n'a pas pu réserver %d billets pour %s car il ne reste que %d places disponibles\033[0m\n", message.nom, random_ticket_num, shared_movies[random_movie_index].movie_name, shared_movies[random_movie_index].seats_available);
                 }
             }
             else
             {
-                printf("Le client %s n'est pas assez âgé pour voir %s\n", message.nom, shared_movies[random_movie_index].movie_name);
+                printf("\033[1;31mLe client %s n'est pas assez âgé pour voir %s\033[0m\n", message.nom, shared_movies[random_movie_index].movie_name);
             }
 
             // Après avoir réservé les billets :
@@ -148,34 +171,38 @@ void print_seats_available(Movie *shared_movies)
 
 int main()
 {
+    srand(time(NULL));
 
-    // Créer un tableau de sémaphores, un pour chaque film
     int semid = semget(IPC_PRIVATE, NUM_MOVIES, 0666 | IPC_CREAT);
 
-    // Initialiser tous les sémaphores à 1
     for (int i = 0; i < NUM_MOVIES; i++)
     {
-        semctl(semid, i, SETVAL, 1);
+        semctl(semid, i, SETVAL, 1); // Initialiser chaque sémaphore à 1
     }
 
-    int msgid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT); // Créer une file de messages IPC
+    int msgid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT);
 
-    // Créer un segment de mémoire partagée pour stocker les données de movies
     int shmid = shmget(IPC_PRIVATE, sizeof(movies), 0666 | IPC_CREAT);
     Movie *shared_movies = (Movie *)shmat(shmid, NULL, 0);
     memcpy(shared_movies, movies, sizeof(movies));
 
-    generate_clients(msgid, shared_movies);
+    pid_t child_pids[MAX_CLIENTS];
+    generate_clients(msgid, shared_movies, child_pids, semid);
     process_ticket_requests(msgid, shared_movies, semid);
 
     print_seats_available(shared_movies);
 
-    // Attendre que tous les processus enfants aient terminé
-    while (wait(NULL) > 0)
-        ;
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        //  printf("Le processus attendu est %d\n", child_pids[i]);
+        int status;
+        pid_t child_pid = waitpid(child_pids[i], &status, 0);
+        //  printf("Le processus enfant avec PID %d s'est terminé\n", child_pid);
+    }
 
-    msgctl(msgid, IPC_RMID, NULL); // Supprimer la file de messages
-    shmctl(shmid, IPC_RMID, NULL); // Supprimer le segment de mémoire partagée
+    msgctl(msgid, IPC_RMID, NULL);
+    shmctl(shmid, IPC_RMID, NULL);
+    semctl(semid, 0, IPC_RMID); // Supprimer l'ensemble de sémaphores
 
     return 0;
 }
