@@ -13,23 +13,29 @@
 
 jmp_buf env; // Variable globale pour stocker l'environnement de saut
 
-#define MAX_CLIENTS 30
-#define NUM_MOVIES 5
-#define MAX_SEATS 50
-#define MAX_MOVIE_PREFERENCES 3
+#define MAX_CLIENTS 50          // Nombre de clients à générer
+#define NUM_MOVIES 5            // Nombre de films à projeter
+#define MAX_SEATS 50            // Nombre de sièges par film
+#define MAX_MOVIE_PREFERENCES 3 // Nombre de films préférés par client
+#define RESERVATION_LIMIT 49    // Limite de réservation totale
 
 const char *prenom[] = {
-    "Jean", "Marie", "Pierre", "Paul", "Jacques", "Francois", "Nicolas", "Michel", "Louis", "Claude"};
+    "Jean", "Marie", "Pierre", "Paul", "Jacques", "Francois", "Nicolas", "Michel", "Louis", "Claude",
+    "Julien", "Benoit", "Maxime", "Alexandre", "Antoine", "Christophe", "David", "Etienne", "Frederic", "Gregoire"};
 
 const char *nom[] = {
-    "Martin", "Bernard", "Thomas", "Petit", "Robert", "Richard", "Durand", "Dubois", "Moreau", "Laurent"};
+    "Martin", "Bernard", "Thomas", "Petit", "Robert", "Richard", "Durand", "Dubois", "Moreau", "Laurent",
+    "Lefevre", "Leroy", "Perrin", "Clement", "Mercier", "Blanc", "Guerin", "Muller", "Faure", "Roux"};
 
 typedef struct
 {
     char movie_name[50];
-    int seats_available;
-    bool is_autorized;
+    bool seats_available[MAX_SEATS];
+    bool is_authorized;
     int age;
+    int num_available_seats;
+    int available_seats[MAX_SEATS];
+    int total_reserved_tickets;
 } Movie;
 
 typedef struct
@@ -42,14 +48,74 @@ typedef struct
     int age;
 } Client;
 
-Movie movies[NUM_MOVIES] = {
-    {"Le Loup De Walstreet", MAX_SEATS, true, 12},
-    {"Harry Potter 1", MAX_SEATS, false, 50},
-    {"50 nuances de grey", MAX_SEATS, true, 16},
-    {"Transformers", MAX_SEATS, false, 0},
-    {"Terminator", MAX_SEATS, false, 0}};
+void initialize_movie(Movie *movie)
+{
+    movie->num_available_seats = MAX_SEATS;
+    for (int i = 0; i < MAX_SEATS; i++)
+    {
+        movie->seats_available[i] = true;
+        movie->available_seats[i] = i + 1; // Numéro de siège commence à 1
+    }
+}
 
-void generate_clients(int msgid, Movie *shared_movies, pid_t *child_pids, int semid)
+int count_available_seats(const Movie *movie)
+{
+    return movie->num_available_seats;
+}
+
+bool reserve_seats(Movie *movie, int num_seats, int *reserved_seats)
+{
+    *reserved_seats = 0;
+    for (int i = 0; i < MAX_SEATS; i++)
+    {
+        if (movie->seats_available[i])
+        {
+            movie->seats_available[i] = false;
+            movie->num_available_seats--;
+            movie->available_seats[*reserved_seats] = i + 1; // Numéro de siège commence à 1
+            (*reserved_seats)++;
+
+            if (*reserved_seats == num_seats)
+            {
+                return true; // Réservation réussie
+            }
+        }
+    }
+
+    return false; // Réservation échouée (pas assez de sièges disponibles)
+}
+
+void adjust_projections(Movie *movies, int num_movies)
+{
+    // Trouver le film le moins demandé
+    int least_demanded_movie = 0;
+    for (int i = 1; i < num_movies; i++)
+    {
+        if (movies[i].total_reserved_tickets < movies[least_demanded_movie].total_reserved_tickets)
+        {
+            least_demanded_movie = i;
+        }
+    }
+
+    // Modifier la projection du film le plus demandé
+    int most_demanded_movie = 0;
+    for (int i = 1; i < num_movies; i++)
+    {
+        if (movies[i].total_reserved_tickets > movies[most_demanded_movie].total_reserved_tickets)
+        {
+            most_demanded_movie = i;
+        }
+    }
+
+    // Afficher le message de modification
+    printf("\033[1;32mModification de la projection : %s -> %s (Demande élevée)\033[0m\n",
+           movies[least_demanded_movie].movie_name, movies[most_demanded_movie].movie_name);
+
+    // Réinitialiser les sièges pour le film le moins demandé
+    initialize_movie(&movies[least_demanded_movie]);
+}
+
+void generate_clients(int msgid, Movie *movies, int num_movies, pid_t *child_pids, int semid)
 {
     for (int i = 0; i < MAX_CLIENTS; i++)
     {
@@ -63,16 +129,18 @@ void generate_clients(int msgid, Movie *shared_movies, pid_t *child_pids, int se
                 Client client;
                 client.msg_type = 1;
 
-                strcpy(client.nom, nom[rand() % 10]);
-                strcpy(client.prenom, prenom[rand() % 10]);
+                // Générer le nom et le prénom du client
+                snprintf(client.nom, sizeof(client.nom), "%s", nom[rand() % 10]);
+                snprintf(client.prenom, sizeof(client.prenom), "%s", prenom[rand() % 10]);
                 client.age = (rand() % 100) + 1;
 
                 printf("Le client %s %s avec le pid : %d\n", client.prenom, client.nom, getpid());
 
+                // Générer les préférences de film du client
                 for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
                 {
-                    int random_movie_index = rand() % NUM_MOVIES;
-                    strcpy(client.movie_preferences[j], shared_movies[random_movie_index].movie_name);
+                    int random_movie_index = rand() % num_movies;
+                    snprintf(client.movie_preferences[j], sizeof(client.movie_preferences[j]), "%s", movies[random_movie_index].movie_name);
                 }
 
                 int random_ticket_num = (rand() % 5) + 1;
@@ -82,7 +150,7 @@ void generate_clients(int msgid, Movie *shared_movies, pid_t *child_pids, int se
             }
 
             // Chaque processus fils doit également utiliser les sémaphores
-            for (int j = 0; j < NUM_MOVIES; j++)
+            for (int j = 0; j < num_movies; j++)
             {
                 struct sembuf v = {j, 1, 0};
                 semop(semid, &v, 1);
@@ -97,9 +165,8 @@ void generate_clients(int msgid, Movie *shared_movies, pid_t *child_pids, int se
     }
 }
 
-void process_ticket_requests(int msgid, Movie *shared_movies, int semid)
+void process_ticket_requests(int msgid, Movie *movies, int num_movies, int semid)
 {
-    // Structure pour recevoir les messages des clients
     struct message
     {
         long mtype;
@@ -110,62 +177,84 @@ void process_ticket_requests(int msgid, Movie *shared_movies, int semid)
         int age;
     } message;
 
-    // Boucle pour traiter les demandes de tous les clients
     for (int i = 0; i < MAX_CLIENTS; i++)
     {
-        // Recevoir le message du client
         msgrcv(msgid, &message, sizeof(message), 1, 0);
 
-        // Utiliser le même nombre de billets pour tous les films
         int random_ticket_num = message.num_tickets;
-
         int reserved_tickets = 0;
 
-        // Parcourir les préférences de films du client
         for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
         {
-            int random_movie_index = rand() % NUM_MOVIES;
+            int random_movie_index = rand() % num_movies;
 
-            // Avant de réserver des billets pour un film :
-            struct sembuf p = {random_movie_index, -1, 0}; // Utiliser l'index généré aléatoirement du film
+            struct sembuf p = {random_movie_index, -1, 0};
             semop(semid, &p, 1);
 
-            // Vérifier si le client est assez âgé pour le film
-            if (message.age >= shared_movies[random_movie_index].age)
+            if (message.age >= movies[random_movie_index].age)
             {
-                // Réserver les billets...
-                if (shared_movies[random_movie_index].seats_available >= random_ticket_num)
+                int current_reserved_seats;
+                if (reserve_seats(&movies[random_movie_index], random_ticket_num, &current_reserved_seats))
                 {
-                    shared_movies[random_movie_index].seats_available -= random_ticket_num;
-                    reserved_tickets += random_ticket_num;
+                    reserved_tickets += current_reserved_seats;
 
-                    printf("Le client %s a réservé %d billets pour %s\n", message.nom, reserved_tickets, shared_movies[random_movie_index].movie_name);
-                    break; // Sortir de la boucle après la première réservation
+                    printf("Le client %s a réservé %d billets pour %s aux sièges ",
+                           message.nom, reserved_tickets, movies[random_movie_index].movie_name);
+
+                    for (int k = 0; k < current_reserved_seats; k++)
+                    {
+                        printf("%d ", movies[random_movie_index].available_seats[k]);
+                    }
+
+                    printf("\n");
+
+                    movies[random_movie_index].total_reserved_tickets += reserved_tickets;
+
+                    if (movies[random_movie_index].total_reserved_tickets >= RESERVATION_LIMIT)
+                    {
+                        adjust_projections(movies, num_movies);
+                    }
+
+                    break;
                 }
                 else
                 {
-                    printf("\033[1;31mLe client %s n'a pas pu réserver %d billets pour %s car il ne reste que %d places disponibles\033[0m\n", message.nom, random_ticket_num, shared_movies[random_movie_index].movie_name, shared_movies[random_movie_index].seats_available);
+                    printf("\033[1;31mLe client %s n'a pas pu réserver %d billets pour %s car il ne reste que %d places disponibles\033[0m\n",
+                           message.nom, random_ticket_num, movies[random_movie_index].movie_name, count_available_seats(&movies[random_movie_index]));
                 }
             }
             else
             {
-                printf("\033[1;31mLe client %s n'est pas assez âgé pour voir %s\033[0m\n", message.nom, shared_movies[random_movie_index].movie_name);
+                printf("\033[1;31mLe client %s n'est pas assez âgé pour voir %s\033[0m\n",
+                       message.nom, movies[random_movie_index].movie_name);
             }
 
-            // Après avoir réservé les billets :
             struct sembuf v = {random_movie_index, 1, 0};
             semop(semid, &v, 1);
         }
     }
 }
 
-void print_seats_available(Movie *shared_movies)
+void print_seats_available(const Movie *movies, int num_movies)
 {
     printf("\n-------------Places disponibles-------------\n");
-    // Imprimer le nombre de places disponibles pour chaque film
-    for (int i = 0; i < NUM_MOVIES; i++)
+    for (int i = 0; i < num_movies; i++)
     {
-        printf("Nombre de places disponibles pour %s = %d\n", shared_movies[i].movie_name, shared_movies[i].seats_available);
+        printf("Nombre de places disponibles pour %s = %d\n", movies[i].movie_name, count_available_seats(&movies[i]));
+        printf("Numéros de sièges disponibles pour %s: ", movies[i].movie_name);
+        for (int j = 0; j < movies[i].num_available_seats; j++)
+        {
+            printf("%d ", movies[i].available_seats[j]);
+        }
+        printf("\n");
+    }
+}
+
+void initialize_semaphores(int semid, int num_sems)
+{
+    for (int i = 0; i < num_sems; i++)
+    {
+        semctl(semid, i, SETVAL, 1);
     }
 }
 
@@ -174,10 +263,18 @@ int main()
     srand(time(NULL));
 
     int semid = semget(IPC_PRIVATE, NUM_MOVIES, 0666 | IPC_CREAT);
+    initialize_semaphores(semid, NUM_MOVIES);
+
+    Movie movies[NUM_MOVIES] = {
+        {"Le Loup De Wall Street", MAX_SEATS, true, 12},
+        {"Harry Potter 1", MAX_SEATS, false, 50},
+        {"50 nuances de grey", MAX_SEATS, true, 16},
+        {"Transformers", MAX_SEATS, false, 0},
+        {"Terminator", MAX_SEATS, false, 0}};
 
     for (int i = 0; i < NUM_MOVIES; i++)
     {
-        semctl(semid, i, SETVAL, 1); // Initialiser chaque sémaphore à 1
+        initialize_movie(&movies[i]);
     }
 
     int msgid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT);
@@ -187,17 +284,15 @@ int main()
     memcpy(shared_movies, movies, sizeof(movies));
 
     pid_t child_pids[MAX_CLIENTS];
-    generate_clients(msgid, shared_movies, child_pids, semid);
-    process_ticket_requests(msgid, shared_movies, semid);
+    generate_clients(msgid, shared_movies, NUM_MOVIES, child_pids, semid);
+    process_ticket_requests(msgid, shared_movies, NUM_MOVIES, semid);
 
-    print_seats_available(shared_movies);
+    print_seats_available(shared_movies, NUM_MOVIES);
 
     for (int i = 0; i < MAX_CLIENTS; i++)
     {
-        //  printf("Le processus attendu est %d\n", child_pids[i]);
         int status;
         pid_t child_pid = waitpid(child_pids[i], &status, 0);
-        //  printf("Le processus enfant avec PID %d s'est terminé\n", child_pid);
     }
 
     msgctl(msgid, IPC_RMID, NULL);
