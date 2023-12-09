@@ -110,9 +110,11 @@ void adjust_projections(Movie *movies, int num_movies)
     // Afficher le message de modification
     printf("\033[1;32mModification de la projection : %s -> %s (Demande élevée)\033[0m\n",
            movies[least_demanded_movie].movie_name, movies[most_demanded_movie].movie_name);
+    printf("\033[1;33mTous les clients du film %s restent dans la salle mais regarderont le film %s. \033[4mLe cinéma s'excuse du désagrément.\033[0m\n",
+           movies[least_demanded_movie].movie_name, movies[most_demanded_movie].movie_name);
 
-    // Réinitialiser les sièges pour le film le moins demandé
-    initialize_movie(&movies[least_demanded_movie]);
+    // changer le nom du film le moins demandé au nom du film le plus demandé
+    snprintf(movies[least_demanded_movie].movie_name, sizeof(movies[least_demanded_movie].movie_name), "%s", movies[most_demanded_movie].movie_name);
 }
 
 void generate_clients(int msgid, Movie *movies, int num_movies, pid_t *child_pids, int semid)
@@ -219,14 +221,14 @@ void process_ticket_requests(int msgid, Movie *movies, int num_movies, int semid
                 }
                 else
                 {
-                    printf("\033[1;31mLe client %s n'a pas pu réserver %d billets pour %s car il ne reste que %d places disponibles\033[0m\n",
-                           message.nom, random_ticket_num, movies[random_movie_index].movie_name, count_available_seats(&movies[random_movie_index]));
+                    printf("\033[1;31mLe client %s avec le pid %d n'a pas pu réserver %d billets pour %s car il ne reste que %d places disponibles\033[0m\n",
+                           message.nom, getpid(), random_ticket_num, movies[random_movie_index].movie_name, count_available_seats(&movies[random_movie_index]));
                 }
             }
             else
             {
-                printf("\033[1;31mLe client %s n'est pas assez âgé pour voir %s\033[0m\n",
-                       message.nom, movies[random_movie_index].movie_name);
+                printf("\033[1;31mLe client %s avec le pid %d n'est pas assez âgé pour voir %s\033[0m\n",
+                       message.nom, getpid(), movies[random_movie_index].movie_name);
             }
 
             struct sembuf v = {random_movie_index, 1, 0};
@@ -287,13 +289,13 @@ int main()
     generate_clients(msgid, shared_movies, NUM_MOVIES, child_pids, semid);
     process_ticket_requests(msgid, shared_movies, NUM_MOVIES, semid);
 
-    print_seats_available(shared_movies, NUM_MOVIES);
-
     for (int i = 0; i < MAX_CLIENTS; i++)
     {
         int status;
         pid_t child_pid = waitpid(child_pids[i], &status, 0);
     }
+
+    print_seats_available(shared_movies, NUM_MOVIES);
 
     msgctl(msgid, IPC_RMID, NULL);
     shmctl(shmid, IPC_RMID, NULL);
