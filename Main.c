@@ -19,6 +19,8 @@ jmp_buf env; // Variable globale pour stocker l'environnement de saut
 #define MAX_MOVIE_PREFERENCES 3 // Nombre de films préférés par client
 #define RESERVATION_LIMIT 49    // Limite de réservation totale
 
+#define EXCHANGE_PERCENTAGE 5 
+
 const char *prenom[] = {
     "Jean", "Marie", "Pierre", "Paul", "Jacques", "Francois", "Nicolas", "Michel", "Louis", "Claude",
     "Julien", "Benoit", "Maxime", "Alexandre", "Antoine", "Christophe", "David", "Etienne", "Frederic", "Gregoire"};
@@ -149,6 +151,18 @@ void generate_clients(int msgid, Movie *movies, int num_movies, pid_t *child_pid
                 client.num_tickets = random_ticket_num;
 
                 msgsnd(msgid, &client, sizeof(client), 0);
+
+                int random_number = rand() % 100;
+
+                // Si le nombre est dans les 20% supérieurs, échanger le ticket du client
+                if (random_number >= 100 - EXCHANGE_PERCENTAGE)
+                {
+                    // Choisir un nouveau film pour le client
+                    int new_movie_index = rand() % num_movies;
+
+                    // Échanger le ticket du client pour le nouveau film
+                    strcpy(client.movie_preferences[0], movies[new_movie_index].movie_name);
+                    printf("\033[1;35mLe client %s %s a échangé son billet pour %s\033[0m\n", client.prenom, client.nom, movies[new_movie_index].movie_name);                }
             }
 
             // Chaque processus fils doit également utiliser les sémaphores
@@ -257,6 +271,35 @@ void initialize_semaphores(int semid, int num_sems)
     for (int i = 0; i < num_sems; i++)
     {
         semctl(semid, i, SETVAL, 1);
+    }
+}
+void exchange_tickets(Client *clients, Movie *movies, int num_clients, int num_movies)
+{
+    srand(time(NULL));
+    int num_exchanges = (num_clients * EXCHANGE_PERCENTAGE) / 100;
+
+    for (int i = 0; i < num_exchanges; i++)
+    {
+        int client_index = rand() % num_clients;
+        int movie_index = rand() % num_movies;
+
+        // Ensure the client is not already booked for this movie
+        bool already_booked = false;
+        for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
+        {
+            if (strcmp(clients[client_index].movie_preferences[j], movies[movie_index].movie_name) == 0)
+            {
+                already_booked = true;
+                break;
+            }
+        }
+
+        if (!already_booked)
+        {
+            // Exchange the ticket
+            strcpy(clients[client_index].movie_preferences[0], movies[movie_index].movie_name);
+            printf("Client %s %s a changé son ticket  %s\n", clients[client_index].prenom, clients[client_index].nom, movies[movie_index].movie_name);
+        }
     }
 }
 
