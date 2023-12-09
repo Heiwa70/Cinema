@@ -10,16 +10,17 @@
 #include <sys/sem.h>
 #include <time.h>
 #include <setjmp.h>
+#include <sys/wait.h>
 
 jmp_buf env; // Variable globale pour stocker l'environnement de saut
 
-#define MAX_CLIENTS 50          // Nombre de clients à générer
+#define MAX_CLIENTS 60          // Nombre de clients à générer
 #define NUM_MOVIES 5            // Nombre de films à projeter
 #define MAX_SEATS 50            // Nombre de sièges par film
 #define MAX_MOVIE_PREFERENCES 3 // Nombre de films préférés par client
-#define RESERVATION_LIMIT 49    // Limite de réservation totale
+#define RESERVATION_LIMIT 45    // Limite de réservation totale
 
-#define EXCHANGE_PERCENTAGE 5 
+#define EXCHANGE_PERCENTAGE 5 // Pourcentage de clients qui échangent leur billet
 
 const char *prenom[] = {
     "Jean", "Marie", "Pierre", "Paul", "Jacques", "Francois", "Nicolas", "Michel", "Louis", "Claude",
@@ -109,14 +110,21 @@ void adjust_projections(Movie *movies, int num_movies)
         }
     }
 
-    // Afficher le message de modification
-    printf("\033[1;32mModification de la projection : %s -> %s (Demande élevée)\033[0m\n",
-           movies[least_demanded_movie].movie_name, movies[most_demanded_movie].movie_name);
-    printf("\033[1;33mTous les clients du film %s restent dans la salle mais regarderont le film %s. \033[4mLe cinéma s'excuse du désagrément.\033[0m\n",
-           movies[least_demanded_movie].movie_name, movies[most_demanded_movie].movie_name);
+    if (strcmp(movies[least_demanded_movie].movie_name, movies[most_demanded_movie].movie_name) != 0)
+    {
+        // Afficher le message de modification
+        printf("\033[1;32mModification de la projection : %s -> %s (Demande élevée)\033[0m\n",
+               movies[least_demanded_movie].movie_name, movies[most_demanded_movie].movie_name);
+        printf("\033[1;33mTous les clients du film %s restent dans la salle mais regarderont le film %s. \033[4mLe cinéma s'excuse du désagrément.\033[0m\n",
+               movies[least_demanded_movie].movie_name, movies[most_demanded_movie].movie_name);
 
-    // changer le nom du film le moins demandé au nom du film le plus demandé
-    snprintf(movies[least_demanded_movie].movie_name, sizeof(movies[least_demanded_movie].movie_name), "%s", movies[most_demanded_movie].movie_name);
+        // changer le nom du film le moins demandé au nom du film le plus demandé
+        snprintf(movies[least_demanded_movie].movie_name, sizeof(movies[least_demanded_movie].movie_name), "%s", movies[most_demanded_movie].movie_name);
+    }
+    else
+    {
+        printf("\033[1;32m[Modification de la projection]\033[0m Erreur le film a déjà été remplacé\n");
+    }
 }
 
 void generate_clients(int msgid, Movie *movies, int num_movies, pid_t *child_pids, int semid)
@@ -138,7 +146,10 @@ void generate_clients(int msgid, Movie *movies, int num_movies, pid_t *child_pid
                 snprintf(client.prenom, sizeof(client.prenom), "%s", prenom[rand() % 10]);
                 client.age = (rand() % 100) + 1;
 
-                printf("Le client %s %s avec le pid : %d\n", client.prenom, client.nom, getpid());
+                int order_location = rand() % 2;
+                const char *location = order_location == 0 ? "à la borne" : "à la caisse";
+
+                printf("\033[1;36m[Create Client]\033[0m Le client %s %s avec le pid : %d se dirige %s\n", client.prenom, client.nom, getpid(), location);
 
                 // Générer les préférences de film du client
                 for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
@@ -162,7 +173,8 @@ void generate_clients(int msgid, Movie *movies, int num_movies, pid_t *child_pid
 
                     // Échanger le ticket du client pour le nouveau film
                     strcpy(client.movie_preferences[0], movies[new_movie_index].movie_name);
-                    printf("\033[1;35mLe client %s %s a échangé son billet pour %s\033[0m\n", client.prenom, client.nom, movies[new_movie_index].movie_name);                }
+                    printf("\033[1;35mLe client %s %s a échangé son billet pour %s\033[0m\n", client.prenom, client.nom, movies[new_movie_index].movie_name);
+                }
             }
 
             // Chaque processus fils doit également utiliser les sémaphores
@@ -214,8 +226,7 @@ void process_ticket_requests(int msgid, Movie *movies, int num_movies, int semid
                 {
                     reserved_tickets += current_reserved_seats;
 
-                    printf("Le client %s a réservé %d billets pour %s aux sièges ",
-                           message.nom, reserved_tickets, movies[random_movie_index].movie_name);
+                    printf("\033[1;33m[Reservation]\033[0m Le client %s a réservé %d billets pour %s aux sièges ", message.nom, reserved_tickets, movies[random_movie_index].movie_name);
 
                     for (int k = 0; k < current_reserved_seats; k++)
                     {
