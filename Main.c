@@ -49,6 +49,7 @@ typedef struct
     char nom[50];
     char prenom[50];
     int age;
+    int has_reservation;
 } Client;
 
 void initialize_movie(Movie *movie)
