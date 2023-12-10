@@ -162,6 +162,9 @@ void generate_clients(int msgid, Movie *movies, int num_movies, pid_t *child_pid
                 int random_ticket_num = (rand() % 5) + 1;
                 client.num_tickets = random_ticket_num;
 
+                // Définir aléatoirement si le client a une réservation
+                client.has_reservation = rand() % 2;
+
                 msgsnd(msgid, &client, sizeof(client), 0);
 
                 int random_number = rand() % 100;
@@ -204,13 +207,33 @@ void process_ticket_requests(int msgid, Movie *movies, int num_movies, int semid
         char nom[50];
         char prenom[50];
         int age;
+        int has_reservation;
     } message;
+
+    // Créer des listes pour les clients avec et sans réservation
+    Client reserved_clients[MAX_CLIENTS];
+    int num_reserved_clients = 0;
+    Client non_reserved_clients[MAX_CLIENTS];
+    int num_non_reserved_clients = 0;
 
     for (int i = 0; i < MAX_CLIENTS; i++)
     {
         msgrcv(msgid, &message, sizeof(message), 1, 0);
 
-        int random_ticket_num = message.num_tickets;
+        if (message.has_reservation)
+        {
+            reserved_clients[num_reserved_clients++] = *(Client *)&message;
+        }
+        else
+        {
+            non_reserved_clients[num_non_reserved_clients++] = *(Client *)&message;
+        }
+    }
+
+    // Traitement prioritaire des clients avec réservation
+    for (int i = 0; i < num_reserved_clients; i++)
+    {
+        int random_ticket_num = reserved_clients[i].num_tickets;
         int reserved_tickets = 0;
 
         for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
@@ -220,14 +243,14 @@ void process_ticket_requests(int msgid, Movie *movies, int num_movies, int semid
             struct sembuf p = {random_movie_index, -1, 0};
             semop(semid, &p, 1);
 
-            if (message.age >= movies[random_movie_index].age)
+            if (reserved_clients[i].age >= movies[random_movie_index].age)
             {
                 int current_reserved_seats;
                 if (reserve_seats(&movies[random_movie_index], random_ticket_num, &current_reserved_seats))
                 {
                     reserved_tickets += current_reserved_seats;
 
-                    printf("\033[1;33m[Reservation]\033[0m Le client %s a réservé %d billets pour %s aux sièges ", message.nom, reserved_tickets, movies[random_movie_index].movie_name);
+                    printf("\033[1;33m[Reservation]\033[0m Le client %s a réservé %d billets pour %s aux sièges ", reserved_clients[i].nom, reserved_tickets, movies[random_movie_index].movie_name);
 
                     for (int k = 0; k < current_reserved_seats; k++)
                     {
@@ -248,13 +271,68 @@ void process_ticket_requests(int msgid, Movie *movies, int num_movies, int semid
                 else
                 {
                     printf("\033[1;31mLe client %s avec le pid %d n'a pas pu réserver %d billets pour %s car il ne reste que %d places disponibles\033[0m\n",
-                           message.nom, getpid(), random_ticket_num, movies[random_movie_index].movie_name, count_available_seats(&movies[random_movie_index]));
+                           reserved_clients[i].nom, getpid(), random_ticket_num, movies[random_movie_index].movie_name, count_available_seats(&movies[random_movie_index]));
                 }
             }
             else
             {
                 printf("\033[1;31mLe client %s avec le pid %d n'est pas assez âgé pour voir %s\033[0m\n",
-                       message.nom, getpid(), movies[random_movie_index].movie_name);
+                       reserved_clients[i].nom, getpid(), movies[random_movie_index].movie_name);
+            }
+
+            struct sembuf v = {random_movie_index, 1, 0};
+            semop(semid, &v, 1);
+        }
+    }
+
+    // Traitement des clients sans réservation
+    for (int i = 0; i < num_non_reserved_clients; i++)
+    {
+        int random_ticket_num = non_reserved_clients[i].num_tickets;
+        int reserved_tickets = 0;
+
+        for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
+        {
+            int random_movie_index = rand() % num_movies;
+
+            struct sembuf p = {random_movie_index, -1, 0};
+            semop(semid, &p, 1);
+
+            if (non_reserved_clients[i].age >= movies[random_movie_index].age)
+            {
+                int current_reserved_seats;
+                if (reserve_seats(&movies[random_movie_index], random_ticket_num, &current_reserved_seats))
+                {
+                    reserved_tickets += current_reserved_seats;
+
+                    printf("\033[1;33m[Reservation]\033[0m Le client %s a réservé %d billets pour %s aux sièges ", non_reserved_clients[i].nom, reserved_tickets, movies[random_movie_index].movie_name);
+
+                    for (int k = 0; k < current_reserved_seats; k++)
+                    {
+                        printf("%d ", movies[random_movie_index].available_seats[k]);
+                    }
+
+                    printf("\n");
+
+                    movies[random_movie_index].total_reserved_tickets += reserved_tickets;
+
+                    if (movies[random_movie_index].total_reserved_tickets >= RESERVATION_LIMIT)
+                    {
+                        adjust_projections(movies, num_movies);
+                    }
+
+                    break;
+                }
+                else
+                {
+                    printf("\033[1;31mLe client %s avec le pid %d n'a pas pu réserver %d billets pour %s car il ne reste que %d places disponibles\033[0m\n",
+                           non_reserved_clients[i].nom, getpid(), random_ticket_num, movies[random_movie_index].movie_name, count_available_seats(&movies[random_movie_index]));
+                }
+            }
+            else
+            {
+                printf("\033[1;31mLe client %s avec le pid %d n'est pas assez âgé pour voir %s\033[0m\n",
+                       non_reserved_clients[i].nom, getpid(), movies[random_movie_index].movie_name);
             }
 
             struct sembuf v = {random_movie_index, 1, 0};
@@ -285,6 +363,7 @@ void initialize_semaphores(int semid, int num_sems)
         semctl(semid, i, SETVAL, 1);
     }
 }
+
 void exchange_tickets(Client *clients, Movie *movies, int num_clients, int num_movies)
 {
     srand(time(NULL));
@@ -295,7 +374,7 @@ void exchange_tickets(Client *clients, Movie *movies, int num_clients, int num_m
         int client_index = rand() % num_clients;
         int movie_index = rand() % num_movies;
 
-        // Ensure the client is not already booked for this movie
+        // S'assurer que le client n'a pas déjà réservé pour ce film
         bool already_booked = false;
         for (int j = 0; j < MAX_MOVIE_PREFERENCES; j++)
         {
@@ -308,9 +387,9 @@ void exchange_tickets(Client *clients, Movie *movies, int num_clients, int num_m
 
         if (!already_booked)
         {
-            // Exchange the ticket
+            // Échanger le billet
             strcpy(clients[client_index].movie_preferences[0], movies[movie_index].movie_name);
-            printf("Client %s %s a changé son ticket  %s\n", clients[client_index].prenom, clients[client_index].nom, movies[movie_index].movie_name);
+            printf("Le client %s %s a changé son billet pour %s\n", clients[client_index].prenom, clients[client_index].nom, movies[movie_index].movie_name);
         }
     }
 }
