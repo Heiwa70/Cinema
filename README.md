@@ -6,46 +6,29 @@ Une simulation de gestion de cinéma utilisant des files de messages pour optimi
 ## Techniques utilisées
 - Files de messages
 - Sémaphores
+- Espaces de mémoire partagée
 
 ## Structure du Projet
 V1 : 
-- `client.c` : Gestion du processus client.
-- `hotesse.c` : Gestion du processus hôtesse.
-- `salle.c` : Gestion du processus salle de cinéma.
-- `communication.c` : Fonctions de communication basées sur les files de messages et les sémaphores.
+- `Main.c` : Fichier Principal
 
 ## Installation
 1. Compiler le code avec un compilateur C standard.
     ```bash
-    gcc client.c -o client
-    gcc hotesse.c -o hotesse
-    gcc salle.c communication.c -o salle
+    gcc Main.c -o prog1
     ```
 
 2. Exécuter les fichiers éxécutables générés.
 
 ## Utilisation
-1. Lancer `salle` pour démarrer la simulation des salles de cinéma.
-    ```bash
-    ./salle
-    ```
-
-2. Lancer autant de processus `client` que nécessaire.
-    ```bash
-    ./client
-    ```
-
-3. Lancer le processus `hotesse` pour gérer les transactions et les échanges de billets.
-    ```bash
-    ./hotesse
-    ```
+1. Lancer `./prog1` pour démarrer la simulation des salles de cinéma et des clients.
 
 ## Gestion des Erreurs
 - La salle informe les clients lorsque la capacité maximale est atteinte.
-- L'hôtesse détecte et gère les films non autorisés.
+- L'hôtesse et le distributeur détecte et gère les films non autorisés.
 
 ## Date limite
-Le projet doit être soumis avant le Vendredi 08 décembre, 23h59.
+Le projet doit être soumis avant le 10 décembre, 20 h 00.
 
 ## Licence
 Ce projet est sous licence [MIT](LICENSE).
